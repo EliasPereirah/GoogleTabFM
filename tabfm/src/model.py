@@ -66,14 +66,6 @@ class AttentionImplementation(str, enum.Enum):
   NONE = 'none'
 
 
-@jt.typed
-def _round_to_multiple_of(val: int, multiple: int) -> int:
-  """Rounds a value up to the nearest multiple of 'multiple'."""
-  assert multiple > 0, f'multiple must be positive. Got {multiple}'
-  assert val >= 0, f'val must be non-negative. Got {val}'
-  return val + (multiple - val % multiple) % multiple
-
-
 # Rotary Embedding
 
 
@@ -371,38 +363,7 @@ class RotaryEmbedding(nnx.Module):
 
 
 # ----------------------------------------------------------------------------
-# 1. Unchanged Data Structures & Placeholders
-#
-# This section contains code that is framework-agnostic or requires a
-# user-provided implementation.
-# ----------------------------------------------------------------------------
-
-
-class ClassNode:
-  """Node in the hierarchical classification tree for handling many-class problems.
-
-  This class is framework-agnostic and remains unchanged from the original.
-  """
-
-  @jt.typed
-  def __init__(self, depth: int = 0):
-    """Initializes the ClassNode.
-
-    Args:
-      depth: Depth of the node in the tree.
-    """
-    self.depth: int = depth
-    self.is_leaf: bool = False
-    self.classes_: Optional[jt.Int[jax.Array | np.ndarray, 'K']] = None
-    self.child_nodes: list[Any] = []
-    self.class_mapping: dict[int, int] = {}
-    self.group_indices: Optional[jt.Int[jax.Array | np.ndarray, 'G']] = None
-    self.R: Optional[jt.Float[jax.Array | np.ndarray, 'B E']] = None
-    self.y: Optional[jt.Int[jax.Array | np.ndarray, 'B']] = None
-
-
-# ----------------------------------------------------------------------------
-# 2. Helper Functions
+# 1. Helper Functions
 #
 # Utility functions used by the NNX modules.
 # ----------------------------------------------------------------------------
@@ -433,7 +394,7 @@ def get_activation(activation: Union[str, Callable]) -> Callable:
 
 
 # ----------------------------------------------------------------------------
-# 3. Translated NNX Modules
+# 2. Translated NNX Modules
 #
 # flax.nnx.Module implementations.
 # ----------------------------------------------------------------------------
@@ -2109,20 +2070,17 @@ class ICLearningCache:
 
 
 class ICLearning(nnx.Module):
-  """Dataset-wise in-context learning with automatic hierarchical classification support.
+  """Dataset-wise in-context learning.
 
   This module is rewritten in Flax NNX and implements in-context learning that:
   1. Takes row representations and training labels as input.
   2. Conditions the model on training examples.
   3. Makes predictions for test examples based on learned patterns.
-  4. Automatically handles both small and large label spaces.
 
   parameters
   ----------
   max_classes : int
-      Number of classes that the model supports natively. If the number of
-      classes
-      in the dataset exceeds this value, hierarchical classification is used.
+      Number of classes that the model supports.
   d_model : int
       Model dimension.
   num_blocks : int
@@ -2181,7 +2139,6 @@ class ICLearning(nnx.Module):
       self.y_encoder = OneHotAndLinear(
           max_classes, d_model, rngs=rngs, dtype=self.dtype
       )
-      self.root: ClassNode | None = None
       self.decoder = MLP(
           in_dim=d_model,
           out_dim=max_classes,
@@ -2316,17 +2273,12 @@ class TabFM(nnx.Module):
   3. Dataset-wise in-context learning learns patterns from labeled examples and
   makes predictions.
 
-  For datasets with more than `max_classes` classes, TabFM switches to
-  hierarchical classification
-  to recursively partition classes into subgroups, forming a multi-level
-  classification tree.
+  Datasets with more than `max_classes` classes are not supported.
 
   Parameters
   ----------
   max_classes : int, default=10
-      Number of classes that the model supports natively. If the number of
-      classes
-      in the dataset exceeds this value, hierarchical classification is used.
+      Number of classes that the model supports.
   embed_dim : int, default=128
       Model dimension used in the column/row embedding transformers. For the
       in-context
@@ -2609,14 +2561,20 @@ class TabFM(nnx.Module):
         d=d,
     )
 
-    if self.is_classifier and num_classes is not None and num_classes > self.icl_predictor.max_classes:
-      raise NotImplementedError('Hierarchical classification is not supported')
-    else:
-      out = self.icl_predictor(
-          representations,
-          y,
-          train_size=train_size,
+    if (
+        self.is_classifier
+        and num_classes is not None
+        and num_classes > self.icl_predictor.max_classes
+    ):
+      raise ValueError(
+          f'Number of classes ({num_classes}) exceeds the maximum supported '
+          f'({self.icl_predictor.max_classes}).'
       )
+    out = self.icl_predictor(
+        representations,
+        y,
+        train_size=train_size,
+    )
 
     return out
 

@@ -1467,8 +1467,7 @@ class TabFMClassifier(ClassifierMixin, BaseEstimator):
 
     Raises:
       ValueError
-        If the number of classes exceeds the model's maximum supported classes
-        and hierarchical classification is disabled.
+        If the number of classes exceeds the model's maximum supported classes.
     """
     check_classification_targets(y)
 
@@ -1483,11 +1482,10 @@ class TabFMClassifier(ClassifierMixin, BaseEstimator):
     self.classes_ = self.y_encoder_.categories_[0]
     self.n_classes_ = len(self.classes_)
 
-    if self.n_classes_ > self.model.max_classes and self.verbose:
-      print(
-          f"The number of classes ({self.n_classes_}) exceeds the max number of"
-          f" classes ({self.model.max_classes}) natively supported by the"
-          " model. Therefore, hierarchical classification is used."
+    if self.n_classes_ > self.model.max_classes:
+      raise ValueError(
+          f"The number of classes ({self.n_classes_}) exceeds the maximum number"
+          f" of classes ({self.model.max_classes}) supported by the model."
       )
 
     #  Transform input features
