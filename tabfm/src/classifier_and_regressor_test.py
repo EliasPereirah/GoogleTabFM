@@ -24,6 +24,7 @@ try:
   HAS_JAX = True
 except ImportError:
   HAS_JAX = False
+from tabfm.src.classifier_and_regressor import check_if_datetime_as_object
 from tabfm.src.classifier_and_regressor import EnsembleGenerator
 from tabfm.src.classifier_and_regressor import TabFMClassifier
 from tabfm.src.classifier_and_regressor import TabFMRegressor
@@ -1008,6 +1009,22 @@ class LabelEncodingTest(absltest.TestCase):
     clf.fit(x, y)
     np.testing.assert_array_equal(clf.classes_, np.array(["a", "z"]))
     self.assertEqual(clf.y_encoder_.mode, "alphabetical")
+
+
+class DatetimeDetectionTest(absltest.TestCase):
+
+  def test_detects_datetime_in_object_and_string_dtypes(self):
+    # Regression guard: pandas>=3 defaults text columns to the StringDtype
+    # (not object). check_if_datetime_as_object must accept both, otherwise
+    # date-as-text columns are missed and silently treated as categorical.
+    dates = ["2020-01-01", "2021-05-02", "2019-12-31", "2018-07-15"] * 4
+    self.assertTrue(check_if_datetime_as_object(pd.Series(dates, dtype=object)))
+    self.assertTrue(check_if_datetime_as_object(pd.Series(dates, dtype="string")))
+
+  def test_non_datetime_text_not_detected(self):
+    words = ["red", "green", "blue", "red"] * 4
+    self.assertFalse(check_if_datetime_as_object(pd.Series(words, dtype=object)))
+    self.assertFalse(check_if_datetime_as_object(pd.Series(words, dtype="string")))
 
 
 if __name__ == "__main__":
