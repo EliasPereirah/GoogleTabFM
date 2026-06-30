@@ -41,7 +41,6 @@ try:
   from flax import nnx
   from jax.experimental import multihost_utils
   from jax.sharding import NamedSharding, PartitionSpec
-  import chex
   HAS_JAX = True
   Array = jax.Array
 except ImportError:
@@ -247,16 +246,26 @@ class CategoricalOrdinalEncoder(BaseEstimator, TransformerMixin):
     return X_out
 
 
-def check_if_datetime_as_object(X: pd.Series) -> bool:
-  """Checks if a pandas Series contains datetime information stored as objects.
+def _looks_like_datetime(X: pd.Series) -> bool:
+  """Checks if a text-typed pandas Series looks like datetime data.
+
+  Considers object- and string-dtype (pandas>=3) columns. Uses a lenient
+  ``errors="coerce"`` parse with a threshold (see below): a column is treated
+  as datetime as long as a meaningful fraction of its values parse as dates,
+  so partially-date columns (dates mixed with some non-date values) are still
+  detected on purpose.
 
   Args:
-    X: A pandas Series whose dtype may or may not be object.
+    X: A pandas Series whose dtype may or may not be object/string.
 
   Returns:
-    True if the series looks like datetime data stored as object dtype.
+    True if the series looks like datetime data stored as text.
   """
-  if not pd.api.types.is_object_dtype(X.dtype):
+  # Accept object dtype and the pandas string dtype (incl. the pyarrow-backed
+  # default in pandas>=3); otherwise date-as-text columns load as 'string',
+  # fail this object-only gate, and silently fall through to categorical.
+  if not (pd.api.types.is_object_dtype(X.dtype)
+          or isinstance(X.dtype, pd.StringDtype)):
     return False
   if X.isnull().all():
     return False
@@ -413,7 +422,7 @@ class TransformToNumerical(TransformerMixin, BaseEstimator):
       series = X[col]
       if pd.api.types.is_datetime64_any_dtype(series.dtype):
         datetime_cols.append(col)
-      elif check_if_datetime_as_object(series):
+      elif _looks_like_datetime(series):
         datetime_cols.append(col)
       elif pd.api.types.is_numeric_dtype(series.dtype):
         numeric_cols.append(col)
@@ -2123,7 +2132,10 @@ class TabFMClassifier(ClassifierMixin, BaseEstimator):
         P = np.tensordot(self.ensemble_weights_, oof_probs_fit, axes=(0, 0))
       else:
         P = np.mean(oof_probs_fit, axis=0)
-      chex.assert_shape(P, (len(y_fit), self.n_classes_))
+      assert P.shape == (len(y_fit), self.n_classes_), (
+          f"Expected calibration input shape {(len(y_fit), self.n_classes_)},"
+          f" got {P.shape}"
+      )
       self._fit_calibration(P, y_fit)
 
     return self

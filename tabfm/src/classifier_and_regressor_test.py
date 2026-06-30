@@ -24,6 +24,7 @@ try:
   HAS_JAX = True
 except ImportError:
   HAS_JAX = False
+from tabfm.src.classifier_and_regressor import _looks_like_datetime
 from tabfm.src.classifier_and_regressor import EnsembleGenerator
 from tabfm.src.classifier_and_regressor import TabFMClassifier
 from tabfm.src.classifier_and_regressor import TabFMRegressor
@@ -1008,6 +1009,40 @@ class LabelEncodingTest(absltest.TestCase):
     clf.fit(x, y)
     np.testing.assert_array_equal(clf.classes_, np.array(["a", "z"]))
     self.assertEqual(clf.y_encoder_.mode, "alphabetical")
+
+
+class DatetimeDetectionTest(absltest.TestCase):
+
+  def test_detects_datetime_in_object_and_string_dtypes(self):
+    # Regression guard: pandas>=3 defaults text columns to the StringDtype
+    # (not object). _looks_like_datetime must accept both, otherwise
+    # date-as-text columns are missed and silently treated as categorical.
+    dates = ["2020-01-01", "2021-05-02", "2019-12-31", "2018-07-15"] * 4
+    self.assertTrue(_looks_like_datetime(pd.Series(dates, dtype=object)))
+    self.assertTrue(_looks_like_datetime(pd.Series(dates, dtype="string")))
+
+  def test_non_datetime_text_not_detected(self):
+    words = ["red", "green", "blue", "red"] * 4
+    self.assertFalse(_looks_like_datetime(pd.Series(words, dtype=object)))
+    self.assertFalse(_looks_like_datetime(pd.Series(words, dtype="string")))
+
+  def test_partially_date_column_is_detected(self):
+    # Intentional leniency: a column that is partly dates (here ~50%) is still
+    # treated as datetime even with some non-parseable values mixed in. The
+    # coerce + threshold parse is deliberate, so date columns with stray junk
+    # are not lost to the categorical fallback.
+    vals = ["2020-01-01", "2021-05-02", "red", "blue"] * 5
+    self.assertTrue(_looks_like_datetime(pd.Series(vals, dtype=object)))
+    self.assertTrue(_looks_like_datetime(pd.Series(vals, dtype="string")))
+
+  def test_mostly_non_date_column_not_detected(self):
+    # Below the parse threshold (~10% dates) -> not datetime -> categorical.
+    vals = ["red", "green", "blue", "yellow", "purple",
+            "a", "b", "c", "d", "e",
+            "f", "g", "h", "i", "j",
+            "k", "l", "m", "2020-01-01", "2021-05-02"]  # 2/20 = 10% dates
+    self.assertFalse(_looks_like_datetime(pd.Series(vals, dtype=object)))
+    self.assertFalse(_looks_like_datetime(pd.Series(vals, dtype="string")))
 
 
 if __name__ == "__main__":
